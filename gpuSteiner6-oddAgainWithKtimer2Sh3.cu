@@ -49,6 +49,7 @@ static const char *inputFile = "./tcSelected/instance137.gr.txt";
 cudaEvent_t tstart, tstop;
 float totalTimeMilliSec = 0.0;
 int sCount = 3; // DEFAULT
+size_t totalGlobalMem;
 
 /*
 __global__ void cpyParentArray(int N, int index, int *d_parentArrays, int *d_parent ){
@@ -202,49 +203,6 @@ void KMBAlgo(int argc, char **argv);
 ////////////////////////////////////////////////////////////////////////////////
 bool printEdges = false;
 bool printHash = false;
-
-int main(int argc, char **argv)
-{
-	freopen(inputFile, "r", stdin);
-	if (argc == 1)
-	{
-		printf("Usage: %s n -p\nn: #SSSPs in parallel. Default n=2\n", argv[0]);
-		sCount = 3;
-	}
-	if (argc > 1)
-	{
-		//~ printEdges=true; //prints edges
-		sCount = ((atoi(argv[1]) == 0) ? 2 : atoi(argv[1]));
-		printHash = true;
-	}
-	if (argc > 2)
-	{
-		printEdges = true;
-	}
-	if (argc > 3)
-	{
-	}
-	//~ if(argc > 1 && strcmp(argv[2],"-p")==0){
-	//~ printEdges = true;
-	//~ }
-	//~ if(argc > 1 && strcmp(argv[3],"-p")==0){
-	//~ printEdges = true;
-	//~ }
-	//~ if(argc > 1 && strcmp(argv[2],"-h")==0){
-	//~ printHash = true;
-	//~ }
-	//~ if(argc > 1 && strcmp(argv[3],"-h")==0){
-	//~ printHash = true;
-	//~ }
-
-	//~ printf("Scount:%d\n",sCount);
-
-	no_of_nodes = 0;
-	edge_list_size = 0;
-	KMBAlgo(argc, argv);
-
-	return EXIT_SUCCESS;
-}
 
 int *edges, *edges_wt;
 int *h_parentArrays;
@@ -703,9 +661,13 @@ void KMBAlgo(int argc, char **argv)
 
 	//~ int source=0;
 	//~ int source2=0;
+	scanf("%d", &no_of_nodes);
+	if (sCount == -1)
+		sCount = totalGlobalMem / (sizeof(int) * no_of_nodes * 10);
+	printf("%d\n", sCount);
+
 	int *source = (int *)malloc(sizeof(int) * (sCount));
 
-	scanf("%d", &no_of_nodes);
 	DEBUG printf("|V|: %d\n", no_of_nodes);
 
 	int num_of_blocks = 1;
@@ -1024,4 +986,41 @@ void KMBAlgo(int argc, char **argv)
 
 	cudaFree(d_cost);
 	cudaFree(d_parentArrays);
+}
+
+int main(int argc, char **argv)
+{
+	freopen(inputFile, "r", stdin);
+	if (argc == 1)
+	{
+		printf("Usage: %s n -p\nn: #SSSPs in parallel. Default n=2\n", argv[0]);
+		sCount = -1;
+	}
+	if (argc > 1)
+	{
+		//~ printEdges=true; //prints edges
+		sCount = ((atoi(argv[1]) == 0) ? 2 : atoi(argv[1]));
+		printHash = true;
+	}
+	if (argc > 2)
+	{
+		printEdges = true;
+	}
+	if (argc > 3)
+	{
+	}
+
+	int device;
+	cudaGetDevice(&device);
+
+	struct cudaDeviceProp props;
+	cudaGetDeviceProperties(&props, device);
+
+	totalGlobalMem = props.totalGlobalMem;
+
+	no_of_nodes = 0;
+	edge_list_size = 0;
+	KMBAlgo(argc, argv);
+
+	return EXIT_SUCCESS;
 }
