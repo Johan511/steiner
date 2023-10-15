@@ -794,11 +794,6 @@ void KMBAlgo(int argc, char **argv)
 	int *d_parent;
 	cudaMalloc((void **)&d_parent, sizeof(int) * no_of_nodes * sCount);
 
-	bool *d_changed;
-	bool *changed = (bool *)malloc(sizeof(bool));
-	cudaMalloc((void **)&d_changed, sizeof(bool));
-	cudaCheckError();
-
 	// new for kSSSP
 	int *d_sources;
 	cudaMalloc((void **)&d_sources, sizeof(int) * sCount);
@@ -824,6 +819,14 @@ void KMBAlgo(int argc, char **argv)
 
 	int tempScount = sCount; // Just to ensure the last run runs < sCount times
 	printf("sCount:%d terminalSize:%d n:%d m:%d\n", sCount, terminalSize, no_of_nodes, edge_list_size);
+
+	// bool *d_changed;
+	// bool *changed = (bool *)malloc(sizeof(bool));
+	// cudaMalloc((void **)&d_changed, sizeof(bool));
+	// cudaCheckError();
+
+	bool *changed;
+	cudaMallocManaged(&changed, sizeof(bool));
 
 	for (int it = 0, end = (terminalSize + sCount - 1) / sCount; it < end; ++it)
 	{ // ceil(terminalSize/sCount)
@@ -873,20 +876,21 @@ void KMBAlgo(int argc, char **argv)
 		{
 			changed[0] = false;
 
-			cudaMemcpy(d_changed, changed, sizeof(bool), cudaMemcpyHostToDevice);
+			// cudaMemcpy(d_changed, changed, sizeof(bool), cudaMemcpyHostToDevice);
 
 			cudaCheckError();
 
 			csrKernelBellmanFordMoore<<<gridKN, threadsKN>>>(no_of_nodes, d_sources,
 															 d_graph_nodes, d_graph_edges, d_graph_weights, // inputs
-															 d_changed,										// fixed pt var
+															 changed,										// fixed pt var
 															 d_cost, d_parent,								// these are outputs
 															 sCount,
 															 tempScount);
+			cudaDeviceSynchronize();
 
 			cudaCheckError();
 
-			cudaMemcpy(changed, d_changed, sizeof(bool), cudaMemcpyDeviceToHost);
+			// cudaMemcpy(changed, d_changed, sizeof(bool), cudaMemcpyDeviceToHost);
 			cudaCheckError();
 
 			k++;
