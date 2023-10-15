@@ -171,6 +171,82 @@ __global__ void csrKernelBellmanFordMoore(int N, int *source, // K SSSP  PULLL//
 	}
 }
 
+__global__ void csrKernelBellmanFordMoore2(int N, int *source, // K SSSP  PULLL//PULLL
+										   int *csrM, int *csrD, int *csrW,
+										   int *minDist, int *parent,
+										   int sCount,
+										   int tempScount)
+{
+
+	unsigned id = threadIdx.x + blockDim.x * blockIdx.x;
+	// printf("%d ", tempScount);
+
+	if (id < tempScount * N)
+	{
+
+		int u = id;			   // may not be needed but easier to code! -- ok! .For reading output
+		int uIn = id % N;	   // for read from input
+		int start = csrM[uIn]; // may not be needed but easier to code! --refereed once :P
+		int end = csrM[uIn + 1];
+		int i, v, old, newDist, minSize;
+
+		// variables to implement ShMEM
+		int size = end - start; // adjList size per thread
+		int j;
+		__shared__ int shD[MAX_INT_IN_SHARED_PER_BLOCK]; // for now. 12288  min(12288, _2M) -- it can never spill over
+
+		for (i = start, j = 0, minSize = (size < SH_REGS_PER_THREAD ? size : SH_REGS_PER_THREAD); i < end && j < minSize; ++i, ++j)
+			shD[threadIdx.x * SH_REGS_PER_THREAD + j] = csrD[i];
+		//******
+
+		//******** 1 PULL SH MEM **********
+		for (i = start, j = 0; i < end; i++, j++)
+		{ // 1 PULL SH MEM
+			if (j < SH_REGS_PER_THREAD)
+				v = shD[threadIdx.x * SH_REGS_PER_THREAD + j]; // If in ShMem take it
+			else
+				v = csrD[i]; // Else Read from Global
+			newDist = minDist[(id / N) * N + v] + csrW[i];
+			old = minDist[u];
+			if (newDist < old)
+			{
+				minDist[u] = newDist;
+				parent[u] = v;
+			}
+		}
+		//******** 2 PULL SH MEM **********
+		for (i = start, j = 0; i < end; i++, j++)
+		{ // 1 PULL SH MEM
+			if (j < SH_REGS_PER_THREAD)
+				v = shD[threadIdx.x * SH_REGS_PER_THREAD + j]; // If in ShMem take it
+			else
+				v = csrD[i]; // Else Read from Global
+			newDist = minDist[(id / N) * N + v] + csrW[i];
+			old = minDist[u];
+			if (newDist < old)
+			{
+				minDist[u] = newDist;
+				parent[u] = v;
+			}
+		}
+		//******** 3 PULL SH MEM **********
+		for (i = start, j = 0; i < end; i++, j++)
+		{ // 1 PULL SH MEM
+			if (j < SH_REGS_PER_THREAD)
+				v = shD[threadIdx.x * SH_REGS_PER_THREAD + j]; // If in ShMem take it
+			else
+				v = csrD[i]; // Else Read from Global
+			newDist = minDist[(id / N) * N + v] + csrW[i];
+			old = minDist[u];
+			if (newDist < old)
+			{
+				minDist[u] = newDist;
+				parent[u] = v;
+			}
+		}
+	}
+}
+
 void PrintParentOf(int n, int *pArray, int shift, int u, int v, set<pair<int, int>> &stEdges)
 {
 	//~ printf("IN printparent %d | %d | (%d_%d)\n", n, shift, u, v);
@@ -820,13 +896,13 @@ void KMBAlgo(int argc, char **argv)
 	int tempScount = sCount; // Just to ensure the last run runs < sCount times
 	printf("sCount:%d terminalSize:%d n:%d m:%d\n", sCount, terminalSize, no_of_nodes, edge_list_size);
 
-	// bool *d_changed;
-	// bool *changed = (bool *)malloc(sizeof(bool));
-	// cudaMalloc((void **)&d_changed, sizeof(bool));
-	// cudaCheckError();
+	bool *d_changed;
+	bool *changed = (bool *)malloc(sizeof(bool));
+	cudaMalloc((void **)&d_changed, sizeof(bool));
+	cudaCheckError();
 
-	bool *changed;
-	cudaMallocManaged(&changed, sizeof(bool));
+	// bool *changed;
+	// cudaMallocManaged(&changed, sizeof(bool));
 
 	for (int it = 0, end = (terminalSize + sCount - 1) / sCount; it < end; ++it)
 	{ // ceil(terminalSize/sCount)
@@ -872,30 +948,50 @@ void KMBAlgo(int argc, char **argv)
 
 		cudaCheckError();
 
+		cudaStream_t bfComputationStream, flagMemCpyStream;
+		cudaStreamCreate(&bfComputationStream);
+		cudaStreamCreate(&flagMemCpyStream);
+
+		cudaEvent_t flagMemCpyEvent;
+		cudaEventCreate(&flagMemCpyEvent);
+
+		cudaEvent_t bfComputationEvent;
+		cudaEventCreate(&bfComputationEvent);
+
+		cudaDeviceSynchronize();
+		cudaCheckError();
+
 		do
 		{
 			changed[0] = false;
-
-			// cudaMemcpy(d_changed, changed, sizeof(bool), cudaMemcpyHostToDevice);
-
+			cudaMemcpy(d_changed, changed, sizeof(bool), cudaMemcpyHostToDevice);
 			cudaCheckError();
-
-			csrKernelBellmanFordMoore<<<gridKN, threadsKN>>>(no_of_nodes, d_sources,
-															 d_graph_nodes, d_graph_edges, d_graph_weights, // inputs
-															 changed,										// fixed pt var
-															 d_cost, d_parent,								// these are outputs
-															 sCount,
-															 tempScount);
-			cudaDeviceSynchronize();
-
+			
+			csrKernelBellmanFordMoore<<<gridKN, threadsKN, 0, bfComputationStream>>>(no_of_nodes, d_sources,
+																					 d_graph_nodes, d_graph_edges, d_graph_weights, // inputs
+																					 d_changed,										// fixed pt var
+																					 d_cost, d_parent,								// these are outputs
+																					 sCount,
+																					 tempScount);
 			cudaCheckError();
+			cudaEventRecord(bfComputationEvent, bfComputationStream);
+			cudaStreamWaitEvent(bfComputationStream, bfComputationEvent);
 
-			// cudaMemcpy(changed, d_changed, sizeof(bool), cudaMemcpyDeviceToHost);
+			cudaMemcpyAsync(changed, d_changed, sizeof(bool), cudaMemcpyDeviceToHost, flagMemCpyStream);
+			cudaEventRecord(flagMemCpyEvent, flagMemCpyStream);
 			cudaCheckError();
 
 			k++;
 
-			DEBUG printf("%d -- FINSHED? %s\n", k, (!changed[0] ? "Yes" : "No"));
+			csrKernelBellmanFordMoore2<<<gridKN, threadsKN, 0, bfComputationStream>>>(no_of_nodes, d_sources,
+																					  d_graph_nodes, d_graph_edges, d_graph_weights, // inputs
+																					  d_cost, d_parent,								 // these are outputs
+																					  sCount,
+																					  tempScount);
+
+			cudaStreamWaitEvent(flagMemCpyStream, flagMemCpyEvent);
+
+			// printf("%d -- FINSHED? %s\n", k, (!changed[0] ? "Yes" : "No"));
 		} while (changed[0] == true);
 		DEBUG printf("AFTER LAUNCH\n");
 
