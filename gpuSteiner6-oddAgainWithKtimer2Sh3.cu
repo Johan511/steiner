@@ -739,7 +739,7 @@ void KMBAlgo(int argc, char **argv)
 	//~ int source2=0;
 	scanf("%d", &no_of_nodes);
 	if (sCount == -1)
-		sCount = totalGlobalMem / (sizeof(int) * no_of_nodes * 10);
+		sCount = totalGlobalMem / (sizeof(int) * no_of_nodes * 6);
 	printf("%d\n", sCount);
 
 	int *source = (int *)malloc(sizeof(int) * (sCount));
@@ -964,9 +964,9 @@ void KMBAlgo(int argc, char **argv)
 		do
 		{
 			changed[0] = false;
-			cudaMemcpy(d_changed, changed, sizeof(bool), cudaMemcpyHostToDevice);
+			cudaMemcpyAsync(d_changed, changed, sizeof(bool), cudaMemcpyHostToDevice, bfComputationStream);
 			cudaCheckError();
-			
+
 			csrKernelBellmanFordMoore<<<gridKN, threadsKN, 0, bfComputationStream>>>(no_of_nodes, d_sources,
 																					 d_graph_nodes, d_graph_edges, d_graph_weights, // inputs
 																					 d_changed,										// fixed pt var
@@ -990,8 +990,9 @@ void KMBAlgo(int argc, char **argv)
 																					  tempScount);
 
 			cudaStreamWaitEvent(flagMemCpyStream, flagMemCpyEvent);
-
-			// printf("%d -- FINSHED? %s\n", k, (!changed[0] ? "Yes" : "No"));
+			cudaStreamSynchronize(bfComputationStream);
+			
+			DEBUG printf("%d -- FINSHED? %s\n", k, (!changed[0] ? "Yes" : "No"));
 		} while (changed[0] == true);
 		DEBUG printf("AFTER LAUNCH\n");
 
