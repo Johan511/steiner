@@ -949,8 +949,8 @@ void KMBAlgo(int argc, char **argv)
 		cudaCheckError();
 
 		cudaStream_t bfComputationStream, flagMemCpyStream;
-		cudaStreamCreate(&bfComputationStream);
-		cudaStreamCreate(&flagMemCpyStream);
+		cudaStreamCreateWithFlags(&bfComputationStream, cudaStreamNonBlocking);
+		cudaStreamCreateWithFlags(&flagMemCpyStream, cudaStreamNonBlocking);
 
 		cudaEvent_t flagMemCpyEvent;
 		cudaEventCreate(&flagMemCpyEvent);
