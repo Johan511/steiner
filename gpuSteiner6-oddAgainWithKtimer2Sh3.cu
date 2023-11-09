@@ -755,7 +755,7 @@ void KMBAlgo(int argc, char **argv)
 	//~ int source2=0;
 	scanf("%d", &no_of_nodes);
 	if (sCount == -1)
-		sCount = totalGlobalMem / (sizeof(int) * no_of_nodes * 6);
+		sCount = totalGlobalMem / (sizeof(int) * no_of_nodes * 3);
 	printf("%d\n", sCount);
 
 	int *source = (int *)malloc(sizeof(int) * (sCount));
