@@ -61,6 +61,22 @@ __global__ void cpyParentArray(int N, int index, int *d_parentArrays, int *d_par
 }
 */
 
+__global__ void SteinerTreeComputationBegin(){
+
+};
+
+__global__ void CompleteGraphComputationEnds(){
+
+};
+
+__global__ void MST1ComputationEnds(){
+
+};
+
+__global__ void MST2ComputationEnds(){
+
+};
+
 __global__ void cpyParentArrayNew(int N, int index, int *d_parentArrays, int *d_parent, int sCount, int tempScount)
 {
 	unsigned id = blockIdx.x * blockDim.x + threadIdx.x; // Changed
@@ -902,8 +918,11 @@ void KMBAlgo(int argc, char **argv)
 	cudaCheckError();
 
 	// bool *changed;
-	// cudaMallocManaged(&changed, sizeof(bool));
+	// cudaMallocManaged(&changed, sizeof(bool));\
 
+	// event for profiling
+	SteinerTreeComputationBegin<<<1, 1>>>();
+	
 	for (int it = 0, end = (terminalSize + sCount - 1) / sCount; it < end; ++it)
 	{ // ceil(terminalSize/sCount)
 
@@ -978,7 +997,6 @@ void KMBAlgo(int argc, char **argv)
 			cudaStreamWaitEvent(bfComputationStream, bfComputationEvent);
 
 			cudaMemcpyAsync(changed, d_changed, sizeof(bool), cudaMemcpyDeviceToHost, flagMemCpyStream);
-			cudaEventRecord(flagMemCpyEvent, flagMemCpyStream);
 			cudaCheckError();
 
 			k++;
@@ -1056,6 +1074,8 @@ void KMBAlgo(int argc, char **argv)
 		}
 	}
 
+	CompleteGraphComputationEnds<<<1, 1>>>();
+
 	// return;
 	cudaMemcpy(h_parentArrays, d_parentArrays, sizeof(int) * no_of_nodes * terminalSize, cudaMemcpyDeviceToHost); // why is this needed? It is used inside MST1
 																												  /// printf("SSSP DONE\n");
@@ -1067,9 +1087,12 @@ void KMBAlgo(int argc, char **argv)
 	DEBUG printf("In main before MST\n");
 	MSTGraph(terminalSize, terminals, W, stEdges, nodeSet);
 
+	MST1ComputationEnds<<<1, 1>>>();
+
 	// Construct G" and Launch the kernel for the MST(G")
 	if (stEdges.size() != nodeSet.size() - 1) //|E| != |V|-1
 		MSTGraphG2(stEdges, nodeSet, W);
+	MST2ComputationEnds<<<1, 1>>>();	
 	//~ else
 	//~ printf("Tree already\n");
 
