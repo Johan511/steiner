@@ -112,7 +112,7 @@ __global__ void csrKernelBellmanFordMoore(int N, int *source, // K SSSP  PULLL//
 										  bool *changed,
 										  int *minDist, int *parent,
 										  int sCount,
-										  int tempScount, bool *completedFlag)
+										  int tempScount, int *counter)
 {
 
 	unsigned id = threadIdx.x + blockDim.x * blockIdx.x;
@@ -133,16 +133,16 @@ __global__ void csrKernelBellmanFordMoore(int N, int *source, // K SSSP  PULLL//
 		// __shared__ int shD[MAX_INT_IN_SHARED_PER_BLOCK]; // for now. 12288  min(12288, _2M) -- it can never spill over
 
 		// for (i = start, j = 0, minSize = (size < SH_REGS_PER_THREAD ? size : SH_REGS_PER_THREAD); i < end && j < minSize; ++i, ++j)
-			// shD[threadIdx.x * SH_REGS_PER_THREAD + j] = csrD[i];
+		// shD[threadIdx.x * SH_REGS_PER_THREAD + j] = csrD[i];
 		//******
 
 		//******** 1 PULL SH MEM **********
 		for (i = start, j = 0; i < end; i++, j++)
 		{ // 1 PULL SH MEM
-			// if (j < SH_REGS_PER_THREAD)
-				// v = shD[threadIdx.x * SH_REGS_PER_THREAD + j]; // If in ShMem take it
+		  // if (j < SH_REGS_PER_THREAD)
+			// v = shD[threadIdx.x * SH_REGS_PER_THREAD + j]; // If in ShMem take it
 			// else
-				v = csrD[i]; // Else Read from Global
+			v = csrD[i]; // Else Read from Global
 			newDist = minDist[(id / N) * N + v] + csrW[i];
 			old = minDist[u];
 			if (newDist < old)
@@ -155,10 +155,10 @@ __global__ void csrKernelBellmanFordMoore(int N, int *source, // K SSSP  PULLL//
 		//******** 2 PULL SH MEM **********
 		for (i = start, j = 0; i < end; i++, j++)
 		{ // 1 PULL SH MEM
-			// if (j < SH_REGS_PER_THREAD)
-				// v = shD[threadIdx.x * SH_REGS_PER_THREAD + j]; // If in ShMem take it
+		  // if (j < SH_REGS_PER_THREAD)
+			// v = shD[threadIdx.x * SH_REGS_PER_THREAD + j]; // If in ShMem take it
 			// else
-				v = csrD[i]; // Else Read from Global
+			v = csrD[i]; // Else Read from Global
 			newDist = minDist[(id / N) * N + v] + csrW[i];
 			old = minDist[u];
 			if (newDist < old)
@@ -171,10 +171,10 @@ __global__ void csrKernelBellmanFordMoore(int N, int *source, // K SSSP  PULLL//
 		//******** 3 PULL SH MEM **********
 		for (i = start, j = 0; i < end; i++, j++)
 		{ // 1 PULL SH MEM
-			// if (j < SH_REGS_PER_THREAD)
-				// v = shD[threadIdx.x * SH_REGS_PER_THREAD + j]; // If in ShMem take it
+		  // if (j < SH_REGS_PER_THREAD)
+			// v = shD[threadIdx.x * SH_REGS_PER_THREAD + j]; // If in ShMem take it
 			// else
-				v = csrD[i]; // Else Read from Global
+			v = csrD[i]; // Else Read from Global
 			newDist = minDist[(id / N) * N + v] + csrW[i];
 			old = minDist[u];
 			if (newDist < old)
@@ -185,7 +185,7 @@ __global__ void csrKernelBellmanFordMoore(int N, int *source, // K SSSP  PULLL//
 			}
 		}
 	}
-	completedFlag[0] = true;
+	atomicAdd(counter, 1);
 }
 
 __global__ void waiting_kernel(int *counter, int tempScount)
@@ -202,9 +202,10 @@ __global__ void csrKernelbfm(int N, int *source, // K SSSP  PULLL//PULLL
 							 int *minDist, int *parent, int *counter)
 {
 	bool *changed = (bool *)malloc(sizeof(bool));
-	bool *completedFlag = (bool *)malloc(sizeof(bool));
+	int *completedFlag = (int *)malloc(sizeof(int));
 
 	changed[0] = true;
+	completedFlag[0] = false;
 
 	while (changed[0] == true)
 	{
@@ -212,15 +213,16 @@ __global__ void csrKernelbfm(int N, int *source, // K SSSP  PULLL//PULLL
 		cudaStream_t s;
 		cudaStreamCreateWithFlags(&s, cudaStreamNonBlocking);
 		csrKernelBellmanFordMoore<<<(N + 1024) / 1024, 1024, 0, s>>>(N, source, // K SSSP  PULLL//PULLL
-																  csrM, csrD, csrW,
-																  changed,
-																  minDist, parent,
-																  1,
-																  1, completedFlag);
-		volatile bool *v_completedFlag = completedFlag;
-		while (v_completedFlag[0] != true)
+																	 csrM, csrD, csrW,
+																	 changed,
+																	 minDist, parent,
+																	 1,
+																	 1, completedFlag);
+		volatile int *v_completedFlag = completedFlag;
+		while (v_completedFlag[0] < (((N + 1024) / 1024) * 1024))
 		{
 		}
+		v_completedFlag[0] = 0;
 	}
 	atomicAdd(counter, 1);
 }
@@ -229,7 +231,7 @@ __global__ void csrKernelBellmanFordMoore2(int N, int *source, // K SSSP  PULLL/
 										   int *csrM, int *csrD, int *csrW,
 										   int *minDist, int *parent,
 										   int sCount,
-										   int tempScount)
+										   int tempScount, int *counter)
 {
 
 	unsigned id = threadIdx.x + blockDim.x * blockIdx.x;
@@ -299,6 +301,7 @@ __global__ void csrKernelBellmanFordMoore2(int N, int *source, // K SSSP  PULLL/
 			}
 		}
 	}
+	atomicAdd(counter, 1);
 }
 
 void PrintParentOf(int n, int *pArray, int shift, int u, int v, set<pair<int, int>> &stEdges)
@@ -960,7 +963,7 @@ void KMBAlgo(int argc, char **argv)
 
 	// event for profiling
 	SteinerTreeComputationBegin<<<1, 1>>>();
-	
+
 	for (int it = 0, end = (terminalSize + sCount - 1) / sCount; it < end; ++it)
 	{ // ceil(terminalSize/sCount)
 
@@ -1023,13 +1026,17 @@ void KMBAlgo(int argc, char **argv)
 			cudaStreamCreate(&sCountStreams[i]);
 
 		// waiting_kernel<<<1, 1, 0, waitingKernelStream>>>(d_counter, tempScount);
-
-		for (int i = 0; i < tempScount; i++)
+		int xxx = 100;
+		for (int i = 0; i < tempScount; i+=xxx)
 		{
-			csrKernelbfm<<<1, 1, 0, sCountStreams[i]>>>(no_of_nodes, d_sources, d_graph_nodes, d_graph_edges, d_graph_weights, d_cost + i*no_of_nodes, d_parent+i*no_of_nodes, d_counter);
+			for(int j=i; j < i+xxx && j < tempScount; j++)
+			{
+				csrKernelbfm<<<1, 1, 0, sCountStreams[j]>>>(no_of_nodes, d_sources, d_graph_nodes, d_graph_edges, d_graph_weights, d_cost + j * no_of_nodes, d_parent + j * no_of_nodes, d_counter);
+				printf("LAUNCH %d\n", j);
+			}
 			cudaDeviceSynchronize();
-			cudaCheckError();
 		}
+		cudaDeviceSynchronize();
 
 		printf("AFTER LAUNCH\n");
 		fflush(stdout);
@@ -1041,8 +1048,9 @@ void KMBAlgo(int argc, char **argv)
 		// copy result from device to host
 		cudaMemcpy(h_cost, d_cost, sizeof(int) * no_of_nodes * tempScount, cudaMemcpyDeviceToHost); //~DOUBLE~  K COPY
 
-		for (int i = 0; i < no_of_nodes * tempScount; i++){
-			fprintf(stderr, "%d\n", h_cost[i]);
+		for (int i = 0; i < no_of_nodes * tempScount; i++)
+		{
+			// fprintf(stderr, "%d\n", h_cost[i]);
 		}
 
 		unsigned long long int sol;
@@ -1115,7 +1123,7 @@ void KMBAlgo(int argc, char **argv)
 	// Construct G" and Launch the kernel for the MST(G")
 	if (stEdges.size() != nodeSet.size() - 1) //|E| != |V|-1
 		MSTGraphG2(stEdges, nodeSet, W);
-	MST2ComputationEnds<<<1, 1>>>();	
+	MST2ComputationEnds<<<1, 1>>>();
 	//~ else
 	//~ printf("Tree already\n");
 
